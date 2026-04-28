@@ -1,115 +1,162 @@
-
 // ==================================================
 // Simulador de Pipas 2D
-// Ponta segue o mouse + pipa com atraso + rabiola viva
+// ✅ Tela inicial com nome
+// ✅ Nome aparece sobre o pipa
+// ✅ Dinâmica clara de MERGULHO
 // ==================================================
 
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
 
+// ================= REDIMENSIONAMENTO =================
 function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 }
-window.addEventListener("resize", resize);
+window.addEventListener('resize', resize);
 resize();
 
-const socket = io();
-const players = {};
+// ================= ESTADO GLOBAL =================
+let gameStarted = false;
+let playerName = '';
 
-// Mouse controla a PONTA da pipa
+// ================= MOUSE =================
 let mouseX = canvas.width / 2;
-let mouseY = canvas.height / 3;
+let mouseY = canvas.height / 2;
+let lastMouseY = mouseY;
 
-canvas.addEventListener("mousemove", (e) => {
+canvas.addEventListener('mousemove', e => {
+  lastMouseY = mouseY;
   mouseX = e.clientX;
   mouseY = e.clientY;
 });
 
-// ========================
-// Configurações visuais
-// ========================
-const KITE_SCALE = 2;          // pipa maior
-const KITE_HEIGHT = 30 * KITE_SCALE;
+// ================= TELA INICIAL =================
+const startBtn = document.getElementById('startBtn');
+const nameInput = document.getElementById('playerName');
 
-// ========================
-// Socket events
-// ========================
-socket.on("currentPlayers", data => Object.assign(players, data));
-socket.on("newPlayer", p => players[p.id] = p);
-socket.on("playerMoved", p => players[p.id] = p);
-socket.on("playerDisconnected", id => delete players[id]);
-
-// ========================
-// Rabiola animada (segue o pipa)
-// ========================
-function drawRabiola(p) {
-  const segments = 16;
-  const length = 10;
-  const wave = 10;
-  const time = Date.now() * 0.005;
-
-  let x = p.x;
-  let y = p.y + KITE_HEIGHT;
-
-  ctx.strokeStyle = "#555";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-
-  for (let i = 0; i < segments; i++) {
-    const sway = Math.sin(time + i * 0.6) * wave + p.vx * 0.4;
-    x += sway * 0.1;
-    y += length;
-    ctx.lineTo(x, y);
+startBtn.addEventListener('click', () => {
+  const name = nameInput.value.trim();
+  if (name.length > 0) {
+    playerName = name;
+    gameStarted = true;
+    document.getElementById('startScreen').style.display = 'none';
   }
+});
 
-  ctx.stroke();
-}
+// ================= ALVO COM SUAVIDADE =================
+const target = { x: mouseX, y: mouseY };
+const TARGET_LAG = 0.08;
 
-// ========================
-// Desenho da pipa
-// ========================
-function drawPipa(p) {
-  const size = 15 * KITE_SCALE;
+// ================= ESTADO DO PIPA =================
+const kite = {
+  x: canvas.width / 2,
+  y: canvas.height / 2,
+  vx: 0,
+  vy: 0,
+  angle: 0
+};
 
-  ctx.fillStyle = p.color;
+// ================= FÍSICA =================
+const FOLLOW_FORCE = 0.03;
+const DAMPING = 0.94;
+const WIND_FORCE = 0.15;
+const DIVE_FORCE = 0.12;
+
+// limites de inclinação
+const MAX_ANGLE = Math.PI / 2.8;
+
+// ================= GEOMETRIA =================
+const KITE_TOP = 16;
+const KITE_BOTTOM = 44;
+const KITE_WIDTH = 48;
+
+// ================= DESENHO DO PIPA =================
+function drawKite() {
+  ctx.save();
+  ctx.translate(kite.x, kite.y);
+  ctx.rotate(kite.angle);
+
+  // corpo do pipa
+  ctx.fillStyle = '#f28c28';
+  ctx.strokeStyle = '#9c5312';
+  ctx.lineWidth = 2;
+
   ctx.beginPath();
-  ctx.moveTo(p.x, p.y - size);      // ponta
-  ctx.lineTo(p.x + size, p.y);
-  ctx.lineTo(p.x, p.y + size);
-  ctx.lineTo(p.x - size, p.y);
+  ctx.moveTo(0, -KITE_TOP);          // cabeça
+  ctx.lineTo(KITE_WIDTH / 2, 0);
+  ctx.lineTo(0, KITE_BOTTOM);        // pé
+  ctx.lineTo(-KITE_WIDTH / 2, 0);
   ctx.closePath();
   ctx.fill();
+  ctx.stroke();
+
+  // cruz do pipa
+  ctx.strokeStyle = '#6a3b0f';
+  ctx.beginPath();
+  ctx.moveTo(0, -KITE_TOP);
+  ctx.lineTo(0, KITE_BOTTOM);
+  ctx.moveTo(-KITE_WIDTH / 2, 0);
+  ctx.lineTo(KITE_WIDTH / 2, 0);
+  ctx.stroke();
+
+  ctx.restore();
+
+  // ================= NOME DO JOGADOR =================
+  ctx.font = 'bold 16px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#000';
+  ctx.fillText(
+    playerName,
+    kite.x,
+    kite.y - KITE_BOTTOM - 20
+  );
 }
 
-// ========================
-// Loop principal
-// ========================
+// ================= LOOP PRINCIPAL =================
 function loop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (players[socket.id]) {
-    const p = players[socket.id];
-
-    // A ponta da pipa segue o mouse (suavemente)
-    const targetX = mouseX;
-    const targetY = mouseY + KITE_HEIGHT;
-
-    p.vx = (targetX - p.x) * 0.08;
-    p.vy = (targetY - p.y) * 0.08;
-
-    p.x += p.vx;
-    p.y += p.vy + Math.sin(Date.now() / 600) * 0.4;
-
-    socket.emit("update", { x: p.x, y: p.y });
+  if (!gameStarted) {
+    requestAnimationFrame(loop);
+    return;
   }
 
-  Object.values(players).forEach(p => {
-    drawRabiola(p);
-    drawPipa(p);
-  });
+  // atraso do mouse (movimento suave)
+  target.x += (mouseX - target.x) * TARGET_LAG;
+  target.y += (mouseY - target.y) * TARGET_LAG;
 
+  const dx = target.x - kite.x;
+  const dy = target.y - kite.y;
+
+  // seguir o alvo
+  kite.vx += dx * FOLLOW_FORCE;
+  kite.vy += dy * FOLLOW_FORCE;
+
+  // ================= MERGULHO =================
+  // mouse descendo rápido OU abaixo do pipa
+  const mouseSpeedDown = mouseY - lastMouseY;
+  if (mouseSpeedDown > 3 || mouseY > kite.y + 40) {
+    kite.vy += mouseSpeedDown * DIVE_FORCE;
+  }
+
+  // vento lateral leve
+  kite.vx += Math.sin(Date.now() * 0.002) * WIND_FORCE;
+
+  // amortecimento
+  kite.vx *= DAMPING;
+  kite.vy *= DAMPING;
+
+  // posição
+  kite.x += kite.vx;
+  kite.y += kite.vy;
+
+  // inclinação / mergulho visual
+  let desiredAngle = Math.atan2(kite.vx, -kite.vy);
+  desiredAngle = Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, desiredAngle));
+  kite.angle += (desiredAngle - kite.angle) * 0.15;
+
+  drawKite();
   requestAnimationFrame(loop);
 }
 

@@ -6,9 +6,18 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+
+  <!-- TELA INICIAL -->
+  <div id="startScreen">
+    <h1>Simulador de Pipas</h1>
+    <input id="playerName" placeholder="Digite seu nome">
+    <button id="startBtn">Iniciar</button>
+  </div>
+
+  <!-- CANVAS DO JOGO -->
   <canvas id="game"></canvas>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <!-- SCRIPT PRINCIPAL -->
   <script src="game.js"></script>
 </body>
 </html>
